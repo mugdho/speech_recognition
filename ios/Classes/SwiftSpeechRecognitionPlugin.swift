@@ -22,6 +22,7 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   private var recognitionTask: SFSpeechRecognitionTask?
 
   private let audioEngine = AVAudioEngine()
+    private var audioSession: AVAudioSession?
 
   init(channel:FlutterMethodChannel){
     speechChannel = channel
@@ -72,7 +73,6 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   }
 
   private func startRecognition(lang: String, result: FlutterResult) {
-    print("startRecognition...")
     if audioEngine.isRunning {
       audioEngine.stop()
       recognitionRequest?.endAudio()
@@ -104,11 +104,19 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   private func start(lang: String) throws {
 
     cancelRecognition(result: nil)
+    
+    if audioEngine.isRunning {
+        audioEngine.stop()
+        recognitionRequest?.endAudio()
+        audioEngine.inputNode.removeTap(onBus: 0)
+    }
 
-    let audioSession = AVAudioSession.sharedInstance()
-    try audioSession.setCategory(AVAudioSessionCategoryRecord)
-    try audioSession.setMode(AVAudioSessionModeMeasurement)
-    try audioSession.setActive(true, with: .notifyOthersOnDeactivation)
+    if audioSession == nil {
+        audioSession = AVAudioSession.sharedInstance()
+        try audioSession?.setCategory(AVAudioSessionCategoryPlayAndRecord, with: .defaultToSpeaker)
+        try audioSession?.setMode(AVAudioSessionModeMeasurement)
+        try audioSession?.setActive(true, with: .notifyOthersOnDeactivation)
+    }
 
     recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
 
@@ -152,7 +160,7 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
 
     audioEngine.prepare()
     try audioEngine.start()
-
+    
     speechChannel!.invokeMethod("speech.onRecognitionStarted", arguments: nil)
   }
 
