@@ -20,12 +20,16 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
 
   private var recognitionTask: SFSpeechRecognitionTask?
-
+    
+  private final  let formatter = DateFormatter()
+    
   private let audioEngine = AVAudioEngine()
     private var audioSession: AVAudioSession?
 
   init(channel:FlutterMethodChannel){
     speechChannel = channel
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
     super.init()
   }
 
@@ -73,7 +77,9 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   }
 
   private func startRecognition(lang: String, result: FlutterResult) {
+    debugPrint("\(formatter.string(from: Date())) [startRecognition] Initiate")
     if audioEngine.isRunning {
+        debugPrint("[startRecognition] Stopping Audio Engine")
       audioEngine.stop()
       recognitionRequest?.endAudio()
       result(false)
@@ -94,46 +100,50 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
   }
 
   private func stopRecognition(result: FlutterResult) {
-    if audioEngine.isRunning {
-      audioEngine.stop()
-      recognitionRequest?.endAudio()
-    }
+    debugPrint("\(formatter.string(from: Date())) [stopRecognition] Initiate")
+//    if audioEngine.isRunning {
+        debugPrint("\(formatter.string(from: Date())) [stopRecognition] Stopping Audio Engine")
+        audioEngine.stop()
+        recognitionRequest?.endAudio()
+        audioEngine.inputNode.removeTap(onBus: 0)
+//    }
     result(false)
   }
 
   private func start(lang: String) throws {
-
+    debugPrint("\(formatter.string(from: Date())) [start] FirstStep")
     cancelRecognition(result: nil)
     
-    if audioEngine.isRunning {
-        audioEngine.stop()
-        recognitionRequest?.endAudio()
-        audioEngine.inputNode.removeTap(onBus: 0)
-    }
-
+    debugPrint("\(formatter.string(from: Date())) [start] SecondStep")
     if audioSession == nil {
+        debugPrint("\(formatter.string(from: Date())) [start] Instantiating AudioSession")
         audioSession = AVAudioSession.sharedInstance()
-        try audioSession?.setCategory(AVAudioSessionCategoryPlayAndRecord, with: .defaultToSpeaker)
-        try audioSession?.setMode(AVAudioSessionModeMeasurement)
-        try audioSession?.setActive(true, with: .notifyOthersOnDeactivation)
     }
-
+    try audioSession?.setCategory(AVAudioSessionCategoryPlayAndRecord, with: .mixWithOthers)
+    debugPrint("\(formatter.string(from: Date())) [start] ThirdStep")
+    try audioSession?.setMode(AVAudioSessionModeDefault)
+    debugPrint("\(formatter.string(from: Date())) [start] FourthStep")
+    try audioSession?.setActive(true, with: .notifyOthersOnDeactivation)
+    debugPrint("\(formatter.string(from: Date())) [start] FifthStep")
+    
+    debugPrint("\(formatter.string(from: Date())) [start] Creating Recognition Request")
     recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
 
     let inputNode = audioEngine.inputNode
+
     guard let recognitionRequest = recognitionRequest else {
-      fatalError("Unable to created a SFSpeechAudioBufferRecognitionRequest object")
+      fatalError("[start] Unable to created a SFSpeechAudioBufferRecognitionRequest object")
     }
 
     recognitionRequest.shouldReportPartialResults = true
 
     let speechRecognizer = getRecognizer(lang: lang)
-
+    debugPrint("\(formatter.string(from: Date())) [start] Setting up Recognition Request")
     recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { result, error in
       var isFinal = false
 
       if let result = result {
-        print("Speech : \(result.bestTranscription.formattedString)")
+        debugPrint("\(self.formatter.string(from: Date())) Speech : \(result.bestTranscription.formattedString)")
         self.speechChannel?.invokeMethod("speech.onSpeech", arguments: result.bestTranscription.formattedString)
         isFinal = result.isFinal
         if isFinal {
@@ -145,22 +155,34 @@ public class SwiftSpeechRecognitionPlugin: NSObject, FlutterPlugin, SFSpeechReco
       }
 
       if error != nil || isFinal {
+        if error != nil {
+            print("Error in recognition: \(error!.localizedDescription)")
+        }
+        debugPrint("[start] Stopping Audio Engine")
         self.audioEngine.stop()
+        debugPrint("L2. Removed Tap")
         inputNode.removeTap(onBus: 0)
         self.recognitionRequest = nil
         self.recognitionTask = nil
       }
     }
 
+    debugPrint("\(self.formatter.string(from: Date())) [start] Resetting InputNode")
+    inputNode.reset()
     let recognitionFormat = inputNode.outputFormat(forBus: 0)
+    debugPrint("\(self.formatter.string(from: Date())) [start] Recognition Format: \(recognitionFormat)")
+    usleep(10000)
+    
+    inputNode.removeTap(onBus: 0)
     inputNode.installTap(onBus: 0, bufferSize: 1024, format: recognitionFormat) {
       (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
+//        debugPrint("\(self.formatter.string(from: Date())) [start] Appending to Buffer")
       self.recognitionRequest?.append(buffer)
     }
-
-    audioEngine.prepare()
+    debugPrint("\(self.formatter.string(from: Date())) [start] Added Tap")
     try audioEngine.start()
-    
+    debugPrint("\(formatter.string(from: Date())) [start] Started Engine \(audioEngine.isRunning)")
+
     speechChannel!.invokeMethod("speech.onRecognitionStarted", arguments: nil)
   }
 
